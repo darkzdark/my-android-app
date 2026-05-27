@@ -29,7 +29,6 @@ class MainActivity : AppCompatActivity() {
     private var currentMethod = "none"
     private var cameraImageUri: Uri? = null
 
-    // ─── Launchers ────────────────────────────────────────────────────────────
     private val galleryLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? -> uri?.let { loadImageFromUri(it) } }
@@ -50,8 +49,6 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // OpenCV 4.9.0 via Maven → gunakan initLocal()
-        // Berbeda dengan SDK lokal yang memerlukan OpenCVLoader.initAsync()
         if (!OpenCVLoader.initLocal()) {
             Toast.makeText(this, "OpenCV gagal dimuat!", Toast.LENGTH_LONG).show()
             return
@@ -98,8 +95,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun openCamera() {
         val imageFile = File(cacheDir, "camera_${System.currentTimeMillis()}.jpg")
-        cameraImageUri = FileProvider.getUriForFile(this, "${packageName}.provider", imageFile)
-        cameraLauncher.launch(cameraImageUri)
+        val uri = FileProvider.getUriForFile(this, "${packageName}.provider", imageFile)
+        cameraImageUri = uri
+        cameraLauncher.launch(uri)
     }
 
     private fun loadImageFromUri(uri: Uri) {
@@ -135,10 +133,6 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // LAPLACIAN FILTER — Perbaikan Blur
-    // Formula: output = original − k × Laplacian(original)
-    // ═══════════════════════════════════════════════════════════════════════════
     private fun applyLaplacianFilter(bitmap: Bitmap, intensity: Float): Bitmap {
         val src = Mat()
         Utils.bitmapToMat(bitmap, src)
@@ -146,23 +140,19 @@ class MainActivity : AppCompatActivity() {
         val gray = Mat()
         Imgproc.cvtColor(src, gray, Imgproc.COLOR_RGBA2GRAY)
 
-        // Gaussian blur dulu untuk menekan noise
         val blurred = Mat()
         Imgproc.GaussianBlur(gray, blurred, Size(3.0, 3.0), 0.0)
 
-        // Hitung Laplacian (turunan kedua)
         val laplacian = Mat()
         Imgproc.Laplacian(blurred, laplacian, CvType.CV_16S, 3)
 
         val laplacian8u = Mat()
         Core.convertScaleAbs(laplacian, laplacian8u)
 
-        // Konversi ke RGBA agar bisa di-blend dengan src
         val laplacianColor = Mat()
         Imgproc.cvtColor(laplacian8u, laplacianColor, Imgproc.COLOR_GRAY2RGBA)
 
-        // Sharpening: original − k × laplacian
-        val k = 0.5f + (intensity / 100f) * 2.5f  // range 0.5–3.0
+        val k = 0.5f + (intensity / 100f) * 2.5f
         val sharpened = Mat()
         Core.addWeighted(src, 1.0, laplacianColor, -k.toDouble(), 0.0, sharpened)
 
@@ -174,7 +164,6 @@ class MainActivity : AppCompatActivity() {
         val result = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
         Utils.matToBitmap(sharpened, result)
 
-        // Bebaskan memori
         src.release(); gray.release(); blurred.release()
         laplacian.release(); laplacian8u.release()
         laplacianColor.release(); sharpened.release()
@@ -182,38 +171,28 @@ class MainActivity : AppCompatActivity() {
         return result
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // CLAHE — Perbaikan Low-Light Image
-    // Alur: BGR → Lab → CLAHE pada channel L → gabung → BGR → RGBA
-    // ═══════════════════════════════════════════════════════════════════════════
     private fun applyCLAHE(bitmap: Bitmap, intensity: Float): Bitmap {
         val src = Mat()
         Utils.bitmapToMat(bitmap, src)
 
-        // RGBA → BGR (format OpenCV)
         val bgr = Mat()
         Imgproc.cvtColor(src, bgr, Imgproc.COLOR_RGBA2BGR)
 
-        // BGR → Lab color space
         val lab = Mat()
         Imgproc.cvtColor(bgr, lab, Imgproc.COLOR_BGR2Lab)
 
-        // Pisahkan channel
         val channels = ArrayList<Mat>()
         Core.split(lab, channels)
 
-        // Terapkan CLAHE hanya pada channel L (luminance)
-        val clipLimit = 1.0 + (intensity / 100f) * 7.0  // range 1.0–8.0
+        val clipLimit = 1.0 + (intensity / 100f) * 7.0
         val clahe = Imgproc.createCLAHE(clipLimit, Size(8.0, 8.0))
         val lEnhanced = Mat()
         clahe.apply(channels[0], lEnhanced)
 
-        // Gabungkan L yang sudah diproses + a + b asli
         channels[0] = lEnhanced
         val labMerged = Mat()
         Core.merge(channels, labMerged)
 
-        // Lab → BGR → RGBA
         val bgrResult = Mat()
         Imgproc.cvtColor(labMerged, bgrResult, Imgproc.COLOR_Lab2BGR)
         val rgbaResult = Mat()
@@ -234,7 +213,6 @@ class MainActivity : AppCompatActivity() {
         return result
     }
 
-    // ─── Simpan ke galeri ─────────────────────────────────────────────────────
     private fun saveResultImage() {
         try {
             val drawable = binding.imageView.drawable as? android.graphics.drawable.BitmapDrawable
