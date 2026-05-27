@@ -1,0 +1,26 @@
+### Android ###
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+### Penting: jangan commit OpenCV SDK lokal ke repo ###
+/opencv/
+/OpenCV-android-sdk/
+*.aar
+
+### Gradle ###
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+### IntelliJ / Android Studio ###
+*.iml
+.idea/
