@@ -446,6 +446,8 @@ class App:
         self.contrast   = tk.DoubleVar(value=1.0)
         self.clahe_var  = tk.IntVar(value=0)
         self.laplacian_var = tk.IntVar(value=0)
+        self.grayscale_var = tk.BooleanVar(value=False)
+        #self.grayscale_before_lap = tk.BooleanVar(value=False)
         self._noise_var = tk.IntVar(value=0)
 
         # ── Weather vars: satu IntVar per filter (0 = off)
@@ -523,6 +525,14 @@ class App:
         SliderRow(sec2, "CLAHE",      self.clahe_var,       0, 100, self.update_all, "{:.0f}").pack()
         SliderRow(sec2, "Sharpening", self.laplacian_var,   0, 100, self.update_all, "{:.0f}").pack()
         SliderRow(sec2, "Noise Reduction", self._noise_var, 0, 10, self.update_all, "{:.0f}").pack()
+        tk.Checkbutton(sec2, text="⬛ Grayscale",
+                    variable=self.grayscale_var,
+                    command=self.update_all,
+                    bg=BG_CARD, fg=TEXT_PRI,
+                    selectcolor=BG_PANEL,
+                    activebackground=BG_CARD,
+                    activeforeground=ACCENT,
+                    font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 2))
         sec2.pack()
 
         # ── Weather Filters ───────────────────────────────────────────────
@@ -776,8 +786,7 @@ class App:
                                 alpha=self.contrast.get(),
                                 beta=self.brightness.get())
 
-        # 2. Noise Reduction DULU sebelum CLAHE
-        # (noise di area gelap harus ditekan sebelum CLAHE memperkuatnya)
+
         # 2. Noise Reduction
         if self._noise_var.get() > 0:
             ksize = int(self._noise_var.get())
@@ -798,12 +807,14 @@ class App:
             img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
         # 4. Laplacian sharpening
+# 4. Laplacian Sharpening
         if self.laplacian_var.get() > 0:
-            k        = 0.5 + self.laplacian_var.get() / 100 * 1.5
-            blurred  = cv2.GaussianBlur(img, (3, 3), 0)
-            # Unsharp masking: kurangkan versi blur dari asli = hanya detail/tepi
-            detail   = cv2.subtract(img, blurred)          # hanya komponen tajam, selalu >= 0
-            img      = cv2.addWeighted(img, 1.0, detail, k, 0)
+            k       = 0.5 + self.laplacian_var.get() / 100 * 2.5
+            gray    = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            lap     = cv2.Laplacian(gray, cv2.CV_64F, ksize=3)
+            lap     = np.clip(lap, 0, 255).astype(np.uint8)
+            lap_bgr = cv2.cvtColor(lap, cv2.COLOR_GRAY2BGR)
+            img     = cv2.addWeighted(img, 1.0, lap_bgr, -k, 0)
 
         # 5. Weather filter
         if self._active_weather:
@@ -811,6 +822,11 @@ class App:
             fn     = fn_map[self._active_weather]
             iv     = self._weather_intensity_var.get()
             img    = fn(img, iv)
+
+        # 6. Grayscale (independen, diterapkan paling akhir)
+        if self.grayscale_var.get():
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img  = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
         self.processed = img
 
@@ -889,12 +905,13 @@ class App:
         messagebox.showinfo("Saved", f"Saved to:\n{path}")
 
     def reset(self):
-        if self.original is None: return
-        self.brightness.set(0); self.contrast.set(1.0)
-        self.clahe_var.set(0);  self.laplacian_var.set(0)
-        self._clear_weather()
-        self.processed = self.original.copy()
-        self.refresh()
+            if self.original is None: return
+            self.brightness.set(0); self.contrast.set(1.0)
+            self.clahe_var.set(0);  self.laplacian_var.set(0)
+            self.grayscale_var.set(False)
+            self._clear_weather()
+            self.processed = self.original.copy()
+            self.refresh()
 
     def auto_detect(self):
         if self.original is None:
@@ -1005,15 +1022,23 @@ class App:
         label.image = photo
 
     def refresh(self):
-        if self.original is None: return
-        self.show_image(self.orig_label, self.original)
-        self.show_image(self.proc_label, self.processed)
-        self.update_histogram()
-        self.update_metrics()
-        if self._view_mode == MODE_COMPARE:
-            self._compare_frame.set_images(self.original, self.processed)
-        h, w = self.original.shape[:2]
-        self.status_res.configure(text=f"Resolution: {w} × {h} px")
+            if self.original is None: return
+
+            # Jika grayscale aktif, original di panel juga tampil grayscale (hanya untuk display)
+            if self.grayscale_var.get():
+                gray        = cv2.cvtColor(self.original, cv2.COLOR_BGR2GRAY)
+                orig_display = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            else:
+                orig_display = self.original
+
+            self.show_image(self.orig_label, orig_display)
+            self.show_image(self.proc_label, self.processed)
+            self.update_histogram()
+            self.update_metrics()
+            if self._view_mode == MODE_COMPARE:
+                self._compare_frame.set_images(orig_display, self.processed)
+            h, w = self.original.shape[:2]
+            self.status_res.configure(text=f"Resolution: {w} × {h} px")
 
     def toggle_fullscreen(self, _=None):
         self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
