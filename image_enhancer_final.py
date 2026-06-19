@@ -1,7 +1,4 @@
 """
-AI Image Enhancement & Analysis Studio
-Dark Professional Edition — v4 (+ Weather Filters)
-
 Dependencies:
 pip install opencv-python numpy pillow matplotlib ttkbootstrap
 """
@@ -18,6 +15,14 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import os
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
+
+import joblib
+
+# Load model klasifikasi AI (Decision Tree) — fallback ke rule-based jika model belum ada
+try:
+    AI_MODEL = joblib.load("image_condition_model.joblib")
+except Exception:
+    AI_MODEL = None
 
 # ─── Palette ──────────────────────────────────────────────────────────────────
 BG_PANEL  = "#1e1e2e"
@@ -921,6 +926,7 @@ class App:
         brightness = np.mean(gray)
         blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
         noise      = np.std(gray)
+        contrast   = gray.std()
 
         lines = ["IMAGE ANALYSIS REPORT", "─" * 30,
                 f"Brightness   {brightness:>8.2f}",
@@ -936,38 +942,36 @@ class App:
         self.brightness.set(0)
         self.contrast.set(1.0)
 
-        # Gambar sangat gelap — noise reduction dulu, baru CLAHE kuat
-        if brightness < 50:
-            self._noise_var.set(5)
-            self.clahe_var.set(95)
-            self.laplacian_var.set(60)
-            actions.append("Very dark → Noise reduction + CLAHE kuat + Sharpening")
+        if AI_MODEL is not None:
+            # Klasifikasi kondisi citra menggunakan model AI (Decision Tree)
+            features  = np.array([[brightness, blur_score, noise, contrast]])
+            condition = AI_MODEL.predict(features)[0]
+            lines.append(f"Kondisi (AI): {condition.upper()}")
 
-        # Gambar gelap biasa
-        elif brightness < 85:
-            self._noise_var.set(3)
-            self.clahe_var.set(80)
-            self.laplacian_var.set(50)
-            actions.append("Low-light → Noise reduction ringan + CLAHE + Sharpening")
-
-        # Gambar overexposed
-        elif brightness > 200:
-            self.brightness.set(-40)
-            self.contrast.set(0.8)
-            actions.append("Overexposed → Brightness & contrast diturunkan")
-
-        # Gambar normal tapi blur
-        elif blur_score < 120:
-            self.laplacian_var.set(80)
-            actions.append("Blur → Sharpening diterapkan")
-
-        # Noise tinggi pada gambar terang
-        if noise > 60 and brightness > 85:
-            self._noise_var.set(5)
-            actions.append("Noise tinggi → Noise reduction diterapkan")
-
-        if not actions:
-            actions.append("Normal → Tidak ada penyesuaian")
+            if condition == "dark":
+                self._noise_var.set(5); self.clahe_var.set(95); self.laplacian_var.set(60)
+                actions.append("AI mendeteksi: Dark → CLAHE kuat + Sharpening")
+            elif condition == "blur":
+                self.laplacian_var.set(80)
+                actions.append("AI mendeteksi: Blur → Sharpening diterapkan")
+            elif condition == "overexposed":
+                self.brightness.set(-40); self.contrast.set(0.8)
+                actions.append("AI mendeteksi: Overexposed → Brightness & contrast diturunkan")
+            elif condition == "noisy":
+                self._noise_var.set(5)
+                actions.append("AI mendeteksi: Noisy → Noise reduction diterapkan")
+            else:
+                actions.append("AI mendeteksi: Normal → Tidak ada penyesuaian")
+        else:
+            # Fallback rule-based jika model belum dilatih
+            if brightness < 50:
+                self._noise_var.set(5); self.clahe_var.set(95); self.laplacian_var.set(60)
+                actions.append("Very dark → Noise reduction + CLAHE kuat + Sharpening")
+            elif blur_score < 120:
+                self.laplacian_var.set(80)
+                actions.append("Blur → Sharpening diterapkan")
+            else:
+                actions.append("Normal → Tidak ada penyesuaian")
 
         lines += ["Tindakan:"]
         lines += [f"  • {a}" for a in actions]
@@ -1052,3 +1056,71 @@ if __name__ == "__main__":
     root.minsize(960, 620)
     App(root)
     root.mainloop()
+
+
+"""
+    def auto_detect(self):
+        if self.original is None:
+            messagebox.showwarning("No image", "Load an image first."); return
+
+        gray       = cv2.cvtColor(self.original, cv2.COLOR_BGR2GRAY)
+        brightness = np.mean(gray)
+        blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+        noise      = np.std(gray)
+
+        lines = ["IMAGE ANALYSIS REPORT", "─" * 30,
+                f"Brightness   {brightness:>8.2f}",
+                f"Blur Score   {blur_score:>8.2f}",
+                f"Noise Level  {noise:>8.2f}", "─" * 30]
+
+        actions = []
+
+        # Reset semua dulu
+        self.clahe_var.set(0)
+        self.laplacian_var.set(0)
+        self._noise_var.set(0)
+        self.brightness.set(0)
+        self.contrast.set(1.0)
+
+        # Gambar sangat gelap — noise reduction dulu, baru CLAHE kuat
+        if brightness < 50:
+            self._noise_var.set(5)
+            self.clahe_var.set(95)
+            self.laplacian_var.set(60)
+            actions.append("Very dark → Noise reduction + CLAHE kuat + Sharpening")
+
+        # Gambar gelap biasa
+        elif brightness < 85:
+            self._noise_var.set(3)
+            self.clahe_var.set(80)
+            self.laplacian_var.set(50)
+            actions.append("Low-light → Noise reduction ringan + CLAHE + Sharpening")
+
+        # Gambar overexposed
+        elif brightness > 200:
+            self.brightness.set(-40)
+            self.contrast.set(0.8)
+            actions.append("Overexposed → Brightness & contrast diturunkan")
+
+        # Gambar normal tapi blur
+        elif blur_score < 120:
+            self.laplacian_var.set(80)
+            actions.append("Blur → Sharpening diterapkan")
+
+        # Noise tinggi pada gambar terang
+        if noise > 60 and brightness > 85:
+            self._noise_var.set(5)
+            actions.append("Noise tinggi → Noise reduction diterapkan")
+
+        if not actions:
+            actions.append("Normal → Tidak ada penyesuaian")
+
+        lines += ["Tindakan:"]
+        lines += [f"  • {a}" for a in actions]
+
+        self.analysis.configure(state="normal")
+        self.analysis.delete("1.0", "end")
+        self.analysis.insert("end", "\n".join(lines))
+        self.analysis.configure(state="disabled")
+        self.update_all()
+"""
